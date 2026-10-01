@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.athan.core.designsystem.component.feedback.ErrorMessage
 import io.athan.core.designsystem.component.feedback.IconMessage
 import io.athan.core.designsystem.component.input.LocationSuggestionItem
+import io.athan.core.designsystem.theme.AthanSpacing
 import io.athan.core.model.Location
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.koin.androidx.compose.koinViewModel
@@ -60,8 +61,6 @@ fun LocationSearchScreen(
     val searchBarState = rememberSearchBarState(initialValue = SearchBarValue.Collapsed)
     var isExpanded = searchBarState.currentValue == SearchBarValue.Expanded
 
-    var textFieldValue by remember { mutableStateOf(TextFieldValue(text = uiState.query)) }
-
     LaunchedEffect(Unit) {
         viewModel.sideEffect.collect { effect ->
             when (effect) {
@@ -73,12 +72,6 @@ fun LocationSearchScreen(
                     onNavigateBack()
                 }
             }
-        }
-    }
-
-    LaunchedEffect(uiState.query) {
-        if (uiState.query != textFieldValue.text) {
-            textFieldValue = textFieldValue.copy(text = uiState.query)
         }
     }
 
@@ -106,59 +99,48 @@ fun LocationSearchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(10.dp),
+                .padding(AthanSpacing.medium),
         ) {
 
-            OutlinedTextField(
-                value = textFieldValue,
-                onValueChange = { newValue ->
-                    textFieldValue = newValue
-                    viewModel.processIntent(LocationSearchIntent.OnQueryChanged(newValue.text))
+            SearchBar(
+                state = searchBarState,
+                inputField = {
+                    SearchBarDefaults.InputField(
+                        query = uiState.query,
+                        onQueryChange = {
+                            viewModel.processIntent(
+                                LocationSearchIntent.OnQueryChanged(
+                                    it
+                                )
+                            )
+                        },
+                        onSearch = { isExpanded = false },
+                        expanded = isExpanded,
+                        onExpandedChange = { isExpanded = it },
+                        placeholder = { Text("Tap your city") },
+                        leadingIcon = {
+                            Icon(Icons.Default.LocationOn, contentDescription = "")
+                        },
+                        trailingIcon = {
+                            if (uiState.query.isNotEmpty()) {
+                                IconButton(onClick = {
+                                    viewModel.processIntent(
+                                        LocationSearchIntent.OnQueryChanged(
+                                            ""
+                                        )
+                                    )
+                                }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear location")
+                                }
+                            }
+                        }
+                    )
                 },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                placeholder = { Text("Tap your city...") }
+                modifier = Modifier
+                    .fillMaxWidth()
             )
 
-//            SearchBar(
-//                state = searchBarState,
-//                inputField = {
-//                    SearchBarDefaults.InputField(
-//                        query = uiState.query,
-//                        onQueryChange = {
-//                            viewModel.processIntent(
-//                                LocationSearchIntent.OnQueryChanged(
-//                                    it
-//                                )
-//                            )
-//                        },
-//                        onSearch = { isExpanded = false },
-//                        expanded = isExpanded,
-//                        onExpandedChange = { isExpanded = it },
-//                        placeholder = { Text("Tap your city") },
-//                        leadingIcon = {
-//                            Icon(Icons.Default.LocationOn, contentDescription = "")
-//                        },
-//                        trailingIcon = {
-//                            if (uiState.query.isNotEmpty()) {
-//                                IconButton(onClick = {
-//                                    viewModel.processIntent(
-//                                        LocationSearchIntent.OnQueryChanged(
-//                                            ""
-//                                        )
-//                                    )
-//                                }) {
-//                                    Icon(Icons.Default.Clear, contentDescription = "Clear location")
-//                                }
-//                            }
-//                        }
-//                    )
-//                },
-//                modifier = Modifier
-//                    .fillMaxWidth()
-//            )
-
-            Spacer(modifier = Modifier.padding(5.dp))
+            Spacer(modifier = Modifier.padding(AthanSpacing.extraSmall))
 
             when (val state = uiState) {
                 is LocationSearchUiState.Idle -> {}
@@ -168,7 +150,7 @@ fun LocationSearchScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Column {
-                            Spacer(modifier = Modifier.padding(10.dp))
+                            Spacer(modifier = Modifier.padding(AthanSpacing.medium))
 
                             IconMessage(
                                 message = "No location found for \"${uiState.query}\"",
@@ -191,7 +173,7 @@ fun LocationSearchScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Column {
-                            Spacer(modifier = Modifier.padding(10.dp))
+                            Spacer(modifier = Modifier.padding(AthanSpacing.medium))
 
                             CircularProgressIndicator()
                         }
@@ -202,8 +184,8 @@ fun LocationSearchScreen(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(horizontal = AthanSpacing.medium),
+                        verticalArrangement = Arrangement.spacedBy(AthanSpacing.small)
                     ) {
                         items(
                             items = state.predictions,
