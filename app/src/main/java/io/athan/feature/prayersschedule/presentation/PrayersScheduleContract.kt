@@ -14,22 +14,24 @@ data class PrayersScheduleUiState(
     val pastPrayersTimes: List<PrayerTimeUiModel> = emptyList(),
     val currentPrayerTime: PrayerTimeUiModel? = null,
     val isLoading: Boolean = false,
+    val isRefreshing: Boolean = false,
     val showDatePicker: Boolean = false,
     val showPastPrayers: Boolean = false,
     val error: String? = null
 )
 
 sealed interface PrayersScheduleIntent {
-    data object onDatePickerClicked : PrayersScheduleIntent
-    data object onDatePickerDismiss : PrayersScheduleIntent
-    data object onCurrentLocationClicked : PrayersScheduleIntent
-    data class onDateSelected(val selectedDateMillis: Long) : PrayersScheduleIntent
-    data object onLocationSelected : PrayersScheduleIntent
-    data object onPastPrayersClicked : PrayersScheduleIntent
-    data object onRefresh : PrayersScheduleIntent
+    data object OnDatePickerClicked : PrayersScheduleIntent
+    data object OnDatePickerDismiss : PrayersScheduleIntent
+    data object OnCurrentLocationClicked : PrayersScheduleIntent
+    data class OnDateSelected(val selectedDateMillis: Long) : PrayersScheduleIntent
+    data object OnLocationSelected : PrayersScheduleIntent
+    data object OnPastPrayersClicked : PrayersScheduleIntent
+    data object OnRetryClicked : PrayersScheduleIntent
+    data object OnPullToRefresh : PrayersScheduleIntent
 }
 
 sealed interface PrayersScheduleSideEffect {
-    data object onNavigateToLocation : PrayersScheduleSideEffect
+    data object OnNavigateToLocation : PrayersScheduleSideEffect
 }
 

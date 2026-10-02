@@ -2,6 +2,8 @@ package io.athan.feature.prayersschedule.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.athan.core.util.formattedStringDate
+import io.athan.core.util.toLocalTime
 import io.athan.feature.location.domain.repository.LocationRepository
 import io.athan.feature.location.presentation.mapper.toDomain
 import io.athan.feature.location.presentation.mapper.toUiModel
@@ -11,8 +13,7 @@ import io.athan.feature.prayersschedule.data.mapper.getUpcomingPrayersTimes
 import io.athan.feature.prayersschedule.domain.usecase.GetPrayerTimesUseCase
 import io.athan.feature.prayersschedule.presentation.mapper.toUiModel
 import io.athan.feature.prayersschedule.presentation.mapper.toUiModels
-import io.athan.core.util.formattedStringDate
-import io.athan.core.util.toLocalTime
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,81 +31,80 @@ class PrayersScheduleViewModel(
     private val locationRepo: LocationRepository,
 ) : ViewModel() {
 
-    private var _uiState = MutableStateFlow(PrayersScheduleUiState(isLoading = true))
+    private val _uiState = MutableStateFlow(
+        PrayersScheduleUiState(
+            isLoading = true,
+            selectedDateMillis = System.currentTimeMillis(),
+            formattedDate = System.currentTimeMillis().formattedStringDate()
+        )
+    )
     val uiState: StateFlow<PrayersScheduleUiState> = _uiState.asStateFlow()
 
-    private var _sideEffect = Channel<PrayersScheduleSideEffect>()
+    private val _sideEffect = Channel<PrayersScheduleSideEffect>()
     val sideEffect = _sideEffect.receiveAsFlow()
+
+    private var locationJob: Job? = null
 
     init {
         observeSelectedLocation()
-        updateDate(System.currentTimeMillis())
     }
 
     fun processIntent(intent: PrayersScheduleIntent) {
         when (intent) {
-            is PrayersScheduleIntent.onDateSelected -> {
-                _uiState.update { currentState ->
-                    currentState.copy(
+            is PrayersScheduleIntent.OnDateSelected -> {
+                _uiState.update {
+                    it.copy(
                         formattedDate = intent.selectedDateMillis.formattedStringDate(),
                         selectedDateMillis = intent.selectedDateMillis,
-                        showDatePicker = false,
-                        isLoading = true
+                        showDatePicker = false
                     )
                 }
-                loadPrayerTimesForSelectedDate()
+                loadPrayerTimes(pullToRefresh = false)
             }
 
-            PrayersScheduleIntent.onLocationSelected -> observeSelectedLocation()
+            PrayersScheduleIntent.OnLocationSelected,
+            PrayersScheduleIntent.OnRetryClicked -> observeSelectedLocation()
 
-            PrayersScheduleIntent.onCurrentLocationClicked -> {
+            PrayersScheduleIntent.OnCurrentLocationClicked -> {
                 viewModelScope.launch {
-                    _sideEffect.send(PrayersScheduleSideEffect.onNavigateToLocation)
+                    _sideEffect.send(PrayersScheduleSideEffect.OnNavigateToLocation)
                 }
             }
 
-            PrayersScheduleIntent.onDatePickerClicked -> {
-                _uiState.update { currentState ->
-                    currentState.copy(showDatePicker = true)
-                }
+            PrayersScheduleIntent.OnDatePickerClicked -> {
+                _uiState.update { it.copy(showDatePicker = true) }
             }
 
-            PrayersScheduleIntent.onDatePickerDismiss -> {
-                _uiState.update { currentState ->
-                    currentState.copy(showDatePicker = false)
-                }
+            PrayersScheduleIntent.OnDatePickerDismiss -> {
+                _uiState.update { it.copy(showDatePicker = false) }
             }
 
-            PrayersScheduleIntent.onPastPrayersClicked -> {
-                _uiState.update { currentState ->
-                    currentState.copy(showPastPrayers = !currentState.showPastPrayers)
-                }
+            PrayersScheduleIntent.OnPastPrayersClicked -> {
+                _uiState.update { it.copy(showPastPrayers = !it.showPastPrayers) }
             }
 
-            PrayersScheduleIntent.onRefresh -> {
-                _uiState.update { currentState ->
-                    currentState.copy(isLoading = true)
-                }
-                observeSelectedLocation()
-            }
+            PrayersScheduleIntent.OnPullToRefresh -> loadPrayerTimes(pullToRefresh = true)
         }
     }
 
     private fun observeSelectedLocation() {
-        viewModelScope.launch {
+        // Annule le Flow précédent pour éviter d'accumuler des abonnements
+        locationJob?.cancel()
+
+        _uiState.update { it.copy(isLoading = true, error = null) }
+
+        locationJob = viewModelScope.launch {
             locationRepo.savedLocation.collect { location ->
                 if (location != null) {
                     _uiState.update { currentState ->
-                        currentState.copy(
-                            selectedLocation = location.toUiModel()
-                        )
+                        currentState.copy(selectedLocation = location.toUiModel())
                     }
-                    loadPrayerTimesForSelectedDate()
+                    loadPrayerTimes(pullToRefresh = false)
                 } else {
                     _uiState.update { currentState ->
                         currentState.copy(
                             error = "Can't find location",
-                            isLoading = false,
+                            isLoading = false
                         )
                     }
                 }
@@ -112,56 +112,53 @@ class PrayersScheduleViewModel(
         }
     }
 
-    private fun loadPrayerTimesForSelectedDate() {
-        viewModelScope.launch {
-            val uiLocation = uiState.value.selectedLocation ?: return@launch
-            val selectedDateMillis = _uiState.value.selectedDateMillis
+    private fun loadPrayerTimes(pullToRefresh: Boolean) {
+        val uiLocation = _uiState.value.selectedLocation ?: return
+        val selectedDateMillis = _uiState.value.selectedDateMillis
 
+        _uiState.update { currentState ->
+            currentState.copy(
+                isRefreshing = pullToRefresh,
+                isLoading = !pullToRefresh,
+                error = null
+            )
+        }
+
+        viewModelScope.launch {
             getPrayerTimesUseCase(selectedDateMillis, uiLocation.toDomain())
                 .onSuccess { prayersSchedule ->
                     val isToday = isSelectedDateToday(selectedDateMillis)
                     val isInPast = isSelectedDateInPast(selectedDateMillis)
 
-                    if (isToday) {
-                        val currentTime = Clock.System.now().toEpochMilliseconds().toLocalTime()
-                        _uiState.update { currentState ->
+                    _uiState.update { currentState ->
+                        if (isToday) {
+                            val currentTime = Clock.System.now().toEpochMilliseconds().toLocalTime()
                             currentState.copy(
-                                selectedLocation = uiLocation,
                                 upcomingPrayersTimes = prayersSchedule.getUpcomingPrayersTimes(
                                     currentTime
                                 ).toUiModels(),
-                                pastPrayersTimes = prayersSchedule.getPastPrayersTime(
-                                    currentTime
-                                ).toUiModels(),
-                                currentPrayerTime = prayersSchedule.findCurrentPrayer(
-                                    currentTime
-                                )?.toUiModel(),
+                                pastPrayersTimes = prayersSchedule.getPastPrayersTime(currentTime)
+                                    .toUiModels(),
+                                currentPrayerTime = prayersSchedule.findCurrentPrayer(currentTime)
+                                    ?.toUiModel(),
                                 isLoading = false,
-                                error = null
+                                isRefreshing = false
                             )
-                        }
-                    } else if (isInPast) {
-                        _uiState.update { currentState ->
+                        } else if (isInPast) {
                             currentState.copy(
-                                selectedLocation = uiLocation,
-                                selectedDateMillis = selectedDateMillis,
                                 currentPrayerTime = null,
                                 pastPrayersTimes = prayersSchedule.toUiModels(),
                                 upcomingPrayersTimes = emptyList(),
                                 isLoading = false,
-                                error = null
+                                isRefreshing = false
                             )
-                        }
-                    } else {
-                        _uiState.update { currentState ->
+                        } else {
                             currentState.copy(
-                                selectedLocation = uiLocation,
-                                selectedDateMillis = selectedDateMillis,
                                 currentPrayerTime = null,
                                 pastPrayersTimes = emptyList(),
                                 upcomingPrayersTimes = prayersSchedule.toUiModels(),
                                 isLoading = false,
-                                error = null
+                                isRefreshing = false
                             )
                         }
                     }
@@ -169,8 +166,9 @@ class PrayersScheduleViewModel(
                 .onFailure { exception ->
                     _uiState.update { currentState ->
                         currentState.copy(
-                            error = exception.message,
-                            isLoading = false
+                            error = exception.message ?: "Erreur inconnue",
+                            isLoading = false,
+                            isRefreshing = false
                         )
                     }
                 }
@@ -191,14 +189,4 @@ class PrayersScheduleViewModel(
         return selectedDate < today
     }
 
-    private fun updateDate(dateMillis: Long) {
-        viewModelScope.launch {
-            _uiState.update { currentState ->
-                currentState.copy(
-                    formattedDate = dateMillis.formattedStringDate(),
-                    selectedDateMillis = dateMillis
-                )
-            }
-        }
-    }
 }

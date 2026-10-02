@@ -30,6 +30,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,7 +57,7 @@ fun PrayersScheduleScreen(
     LaunchedEffect(Unit) {
         viewModel.sideEffect.collect { effect ->
             when (effect) {
-                PrayersScheduleSideEffect.onNavigateToLocation -> onNavigateToLocationSearch()
+                PrayersScheduleSideEffect.OnNavigateToLocation -> onNavigateToLocationSearch()
             }
         }
     }
@@ -90,8 +92,8 @@ fun PrayersScheduleContent(
                 PrayersScheduleHeader(
                     selectedDate = uiState.formattedDate,
                     selectedLocation = uiState.selectedLocation,
-                    onDateClick = { onIntent(PrayersScheduleIntent.onDatePickerClicked) },
-                    onLocationClick = { onIntent(PrayersScheduleIntent.onCurrentLocationClicked) })
+                    onDateClick = { onIntent(PrayersScheduleIntent.OnDatePickerClicked) },
+                    onLocationClick = { onIntent(PrayersScheduleIntent.OnCurrentLocationClicked) })
 
                 Spacer(modifier = Modifier.height(AthanSpacing.small))
 
@@ -119,7 +121,7 @@ fun PrayersScheduleContent(
                             ) {
                                 ErrorMessage(message = uiState.error)
                                 FilledTonalButton(
-                                    onClick = { onIntent(PrayersScheduleIntent.onRefresh) }
+                                    onClick = { onIntent(PrayersScheduleIntent.OnRetryClicked) }
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Refresh,
@@ -135,28 +137,32 @@ fun PrayersScheduleContent(
                         if (uiState.upcomingPrayersTimes.isNotEmpty() || uiState.pastPrayersTimes.isNotEmpty()) {
                             PrayersTimesListContent(
                                 uiState = uiState,
-                                onTogglePastPrayers = { onIntent(PrayersScheduleIntent.onPastPrayersClicked) })
+                                onTogglePastPrayers = { onIntent(PrayersScheduleIntent.OnPastPrayersClicked) },
+                                onIntent = onIntent
+                            )
                         } else {
                             IconMessage(
-                                message = "No prayers to show", icon = Icons.Default.HourglassEmpty
+                                message = "No prayers to show",
+                                icon = Icons.Default.HourglassEmpty
                             )
                         }
                     }
                 }
             }
+
             if (uiState.showDatePicker) {
                 DatePickerDialog(
                     initialSelectedDateMillis = uiState.selectedDateMillis,
                     onDateSelected = {
                         onIntent(
-                            PrayersScheduleIntent.onDateSelected(
+                            PrayersScheduleIntent.OnDateSelected(
                                 it
                             )
                         )
                     },
                     onDismiss = {
                         onIntent(
-                            PrayersScheduleIntent.onDatePickerDismiss
+                            PrayersScheduleIntent.OnDatePickerDismiss
                         )
                     })
             }
@@ -166,8 +172,13 @@ fun PrayersScheduleContent(
 
 @Composable
 fun PrayersTimesListContent(
-    uiState: PrayersScheduleUiState, onTogglePastPrayers: () -> Unit
+    uiState: PrayersScheduleUiState,
+    onTogglePastPrayers: () -> Unit,
+    onIntent: (PrayersScheduleIntent) -> Unit
 ) {
+
+    val pullToRefreshState = rememberPullToRefreshState()
+
     val onlyPastPrayers =
         uiState.pastPrayersTimes.isNotEmpty() && uiState.upcomingPrayersTimes.isEmpty()
 
@@ -179,72 +190,79 @@ fun PrayersTimesListContent(
 
     Spacer(modifier = Modifier.padding(AthanSpacing.small))
 
-    LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(AthanSpacing.small)
+    PullToRefreshBox(
+        isRefreshing = uiState.isRefreshing,
+        onRefresh = { onIntent(PrayersScheduleIntent.OnPullToRefresh) }
     ) {
-        if (onlyPastPrayers) {
-            uiState.pastPrayersTimes.forEach { prayer ->
-                item {
-                    PrayerItemRow(
-                        name = prayer.name,
-                        time = prayer.time,
-                        isPast = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-        } else {
-            if (uiState.pastPrayersTimes.isNotEmpty()) {
-                item(key = "toggle_past_prayers") {
-                    TextButton(
-                        onClick = { onTogglePastPrayers() },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (uiState.showPastPrayers) {
-                            Text("Hide past prayers")
-                        } else {
-                            Text("Show past prayers")
-                        }
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(AthanSpacing.small)
+        ) {
+            if (onlyPastPrayers) {
+                uiState.pastPrayersTimes.forEach { prayer ->
+                    item {
+                        PrayerItemRow(
+                            name = prayer.name,
+                            time = prayer.time,
+                            isPast = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
-
-                item(key = "past_prayers_accordion") {
-                    AnimatedVisibility(
-                        visible = uiState.showPastPrayers,
-                        enter = expandVertically(animationSpec = tween(300)) + fadeIn(
-                            animationSpec = tween(300)
-                        ),
-                        exit = shrinkVertically(animationSpec = tween(300)) + fadeOut(
-                            animationSpec = tween(300)
-                        ),
-                        modifier = Modifier.animateItem()
-                    ) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(AthanSpacing.small)
+            } else {
+                if (uiState.pastPrayersTimes.isNotEmpty()) {
+                    item(key = "toggle_past_prayers") {
+                        TextButton(
+                            onClick = { onTogglePastPrayers() },
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
-                            uiState.pastPrayersTimes.forEach { prayer ->
-                                PrayerItemRow(
-                                    name = prayer.name,
-                                    time = prayer.time,
-                                    isPast = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                            if (uiState.showPastPrayers) {
+                                Text("Hide past prayers")
+                            } else {
+                                Text("Show past prayers")
+                            }
+                        }
+                    }
+
+                    item(key = "past_prayers_accordion") {
+                        AnimatedVisibility(
+                            visible = uiState.showPastPrayers,
+                            enter = expandVertically(animationSpec = tween(300)) + fadeIn(
+                                animationSpec = tween(300)
+                            ),
+                            exit = shrinkVertically(animationSpec = tween(300)) + fadeOut(
+                                animationSpec = tween(300)
+                            ),
+                            modifier = Modifier.animateItem()
+                        ) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(AthanSpacing.small)
+                            ) {
+                                uiState.pastPrayersTimes.forEach { prayer ->
+                                    PrayerItemRow(
+                                        name = prayer.name,
+                                        time = prayer.time,
+                                        isPast = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        items(
-            items = uiState.upcomingPrayersTimes,
-            key = { "upcoming_${it.name}" }) { prayerTime ->
-            PrayerItemRow(
-                name = prayerTime.name,
-                time = prayerTime.time,
-                isPast = false,
-                modifier = Modifier.fillMaxWidth()
-            )
+            items(
+                items = uiState.upcomingPrayersTimes,
+                key = { "upcoming_${it.name}" }) { prayerTime ->
+
+
+                PrayerItemRow(
+                    name = prayerTime.name,
+                    time = prayerTime.time,
+                    isPast = false,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }
